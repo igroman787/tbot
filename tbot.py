@@ -825,5 +825,3 @@ if __name__ == "__main__":
 	General()
 	time.sleep(1.1)
 #end if
-
-
