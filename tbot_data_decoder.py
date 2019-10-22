@@ -12,5 +12,8 @@ def Base64ToItemWithDecompress(item):
 #end define
 
 while True:
-	print(Base64ToItemWithDecompress(input("enter base64: ")))
+	inputText = input("enter base64: ")
+	data = Base64ToItemWithDecompress(inputText)
+	myJson = json.dumps(data, sort_keys=True, indent=4)
+	print(myJson)
 #end while

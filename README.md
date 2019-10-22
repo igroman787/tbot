@@ -1,2 +1,2 @@
 # tbot
-md5: ed6d214e1502006d245748b83ccfb497
+tbot.py md5 checksum: a484a438883993a789c22f9d4bbb8f03

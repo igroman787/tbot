@@ -26,7 +26,7 @@ def Init():
 	localdb["sendList"]["statusList"] = list()
 	localdb["sendList"]["logList"] = list()
 	localdb["sendList"]["telemetryList"] = list()
-	localdb["logLevel"] = "" #del me!
+	localdb["sendList"]["bigTelemetryList"] = list()
 	localbuffer = dict()
 	localbuffer["logList"] = list()
 	localbuffer["selfTestingResult"] = dict()
@@ -35,33 +35,33 @@ def Init():
 	# Get program, log and database file name
 	myPath = GetMyPath()
 	myName = GetMyName()
+	myFullPath = GetMyFullPath()
 	localbuffer["logFileName"] = myPath + myName + ".log"
 	localbuffer["localdbFileName"] = myPath + myName + ".db"
+	myMd5 = GetHashMd5(myFullPath)
 
 	# Записаться в автозагрузку
 	Autostart.AddAutostart()
 
 	# First start up
-	if not os.path.isfile(localbuffer["localdbFileName"]):
+	if LocaldbLoad() == False:
 		FirstStartUp()
-	else:
-		LocaldbLoad()
 
 	# Remove old log file
-	if (localdb["isDeleteOldLogFile"] == True and os.path.isfile(localbuffer["logFileName"]) == True):
+	if "isDeleteOldLogFile" in localdb and localdb["isDeleteOldLogFile"] == True and os.path.isfile(localbuffer["logFileName"]) == True:
 		os.remove(localbuffer["logFileName"])
 
 	# Logging the start of the program
 	AddLog("Start program \"{0}\"".format(GetMyFullPath()))
-	buffer = {"timestamp":int(time.time()), "text":"Start tbot service"}
-	localdb["sendList"]["logList"].append(buffer)
+	AddLogToSendList("Start tbot service")
+	AddLogToSendList("md5 checksum: {0}".format(myMd5))
 	os.system("logger -i Start tbot service")
 
 	# Start other threads
 	threading.Thread(target=Logging, name="Logging", daemon=True).start()
-	threading.Thread(target=SelfTesting, name="SelfTesting", daemon=True).start()
-	threading.Thread(target=LocaldbSaving, name="LocdbSaving", daemon=True).start()
+	threading.Thread(target=SelfTesting, name="STesting", daemon=True).start()
 	threading.Thread(target=SelfUpdating, name="SUpdating", daemon=True).start()
+	threading.Thread(target=LocaldbSaving, name="LocdbSaving", daemon=True).start()
 #end define
 
 def FirstStartUp():
@@ -71,8 +71,8 @@ def FirstStartUp():
 	localdb["isDeleteOldLogFile"] = False
 	localdb["isIgnorLogWarning"] = False
 	localdb["logLevel"] = "debug" # info || debug
-	localdb["serverAddress"] = "http://77.222.60.194/teleofis_state.html"
 	localdb["memoryUsinglimit"] = 50
+	localdb["serverAddress"] = base64.b64decode("aHR0cDovLzc3LjIyMi42MC4xOTQvdGVsZW9maXNfc3RhdGUuaHRtbA==").decode()
 	### fix me! ###
 #end define
 
@@ -81,7 +81,8 @@ def General():
 	threading.Thread(target=CommunicationTesting, name="CommTesting", daemon=True).start()
 	threading.Thread(target=Sending, name="Sending", daemon=True).start()
 	threading.Thread(target=SysLogging, name="SysLogging", daemon=True).start()
-	threading.Thread(target=GettingInfo, name="GettingInfo", daemon=True).start()
+	threading.Thread(target=GettingTelemetryInfo, name="GetTelInfo", daemon=True).start()
+	threading.Thread(target=GettingBigTelemetryInfo, name="GetBigInfo", daemon=True).start()
 	mqttClient = MqttClient()
 	mqttPublisher = MqttPublisher()
 	mqttClient.start()
@@ -131,9 +132,9 @@ def AddLog(inputText, mode="info"):
 	timeText = "{0} (UTC)".format(timeText).ljust(32, ' ')
 
 	# Pass if set log level
-	if localdb["logLevel"] != "debug" and mode == "debug":
+	if "logLevel" in localdb and localdb["logLevel"] != "debug" and mode == "debug":
 		return
-	elif localdb["isIgnorLogWarning"] == True and mode == "warning":
+	elif "isIgnorLogWarning" in localdb and localdb["isIgnorLogWarning"] == True and mode == "warning":
 		return
 
 	# Set color mode
@@ -358,7 +359,7 @@ class MqttClient(threading.Thread):
 		try:
 			self.Main()
 		except Exception as err:
-			AddLog(err, "error")
+			AddLog("MqttClient: {0}".format(err), "error")
 	#end define
 
 	def Main(self):
@@ -428,7 +429,7 @@ class MqttPublisher(threading.Thread):
 		try:
 			self.Main()
 		except Exception as err:
-			AddLog(err, "error")
+			AddLog("MqttPublisher: {0}".format(err), "error")
 	#end define
 
 	def Main(self):
@@ -484,7 +485,7 @@ class MqttPublisher(threading.Thread):
 			text = urlopen(localdb["serverAddress"]).read().decode()
 			result = "Online"
 		except Exception as err:
-			AddLog(err, "debug")
+			AddLog("MqttPublisher: {0}".format(err), "error")
 		return result
 	#end define
 
@@ -550,9 +551,9 @@ def DataSend():
 			localbuffer["mqtt"]["lastSendTime"] = time.strftime("%H:%M:%S")
 		except Exception as err:
 			RestoreDataToSendList(data)
-			buffer = {"timestamp":int(time.time()), "text":str(err)}
-			localdb["sendList"]["logList"].append(buffer)
-			AddLog(err, "error")
+			errorText = "DataSend: {0}".format(err)
+			AddLogToSendList(errorText)
+			AddLog(errorText, "error")
 			return
 #end define
 
@@ -579,7 +580,8 @@ def GetDataFromSendList():
 def RestoreDataToSendList(inputData):
 	global localdb
 	for itemName in inputData:
-		RestoreList(inputData[itemName], localdb["sendList"][itemName])
+		if itemName in localdb["sendList"]:
+			RestoreList(inputData[itemName], localdb["sendList"][itemName])
 #end define
 
 def GetRequest(url):
@@ -589,7 +591,7 @@ def GetRequest(url):
 	return text
 #end define
 
-def GetItemsFromList(inputList, count=10):
+def GetItemsFromList(inputList, count=5):
 	outputList = list()
 	for i in range(count):
 		if len(inputList) == 0:
@@ -636,7 +638,7 @@ def TrySysLogReaction(inputText):
 	try:
 		SysLogReaction(inputText)
 	except Exception as err:
-		AddLog("TrySysLogReaction: {0}".format(err))
+		AddLog("TrySysLogReaction: {0}".format(err), "error")
 #end define
 
 def SysLogReaction(inputText):
@@ -646,9 +648,7 @@ def SysLogReaction(inputText):
 		timestamp = int(time.time())
 		logList = ["Accepted password", "Accepted publickey", "Received disconnect", "Exiting"]
 		if (IsItemFromListInText(logList, text) == True):
-		#if (len(text) > 0):
-			buffer = {"timestamp":timestamp, "text":text}
-			localdb["sendList"]["logList"].append(buffer)
+			AddLogToSendList(text)
 			AddLog("SysLogReaction: " + text, "debug")
 			if "Accepted password" in text or "Accepted publickey" in text:
 				SendNow()
@@ -658,14 +658,14 @@ def LocaldbSaving():
 	AddLog("Start LocaldbSaving thread.", "debug")
 	while True:
 		time.sleep(3) # 3 sec
-		threading.Thread(target=TryLocaldbSave).start()
+		threading.Thread(target=LocaldbSave).start()
 #end define
 
 def TryLocaldbSave():
 	try:
 		LocaldbSave()
 	except Exception as err:
-		AddLog("TryLocaldbSave: {0}".format(err))
+		AddLog("TryLocaldbSave: {0}".format(err), "error")
 #end define
 
 def LocaldbSave():
@@ -681,18 +681,20 @@ def LocaldbSave():
 
 def LocaldbLoad():
 	global localdb
+	result = False
 	try:
 		myPath = GetMyPath()
 		myName = GetMyName()
 		fileName = myPath + myName + ".db"
-		if (os.path.isfile(fileName) == False):
-			return
 		file = open(fileName, 'r')
 		original = file.read()
 		localdb = Base64ToItemWithDecompress(original)
+		localdb["sendList"]["bigTelemetryList"] = list()
 		file.close()
+		result = True
 	except Exception as err:
-		AddLog(err, "error")
+		AddLog("LocaldbLoad: {0}".format(err), "error")
+	return result
 #end define
 
 def IsItemFromListInText(inputList, text):
@@ -704,30 +706,86 @@ def IsItemFromListInText(inputList, text):
 	return result
 #end define
 
-def GettingInfo():
-	AddLog("Start GettingInfo thread.", "debug")
+def GettingTelemetryInfo():
+	AddLog("Start GettingTelemetryInfo thread.", "debug")
 	while True:
 		time.sleep(60) # 60 sec
-		threading.Thread(target=TryGetInfo).start()
+		threading.Thread(target=TryGetTelemetryInfo).start()
 #end define
 
-def TryGetInfo():
+def TryGetTelemetryInfo():
 	try:
-		GetInfo()
+		GetTelemetryInfo()
 	except Exception as err:
-		AddLog("TryGetInfo: {0}".format(err))
+		AddLog("TryGetTelemetryInfo: {0}".format(err), "error")
 #end define
 
-def GetInfo():
+def GetTelemetryInfo():
 	global localdb
 	timestamp = int(time.time())
-	boardTemp = localbuffer["mqtt"]["boardTemp"]
-	cpuTemp = localbuffer["mqtt"]["cpuTemp"]
-	gprsIp = localbuffer["mqtt"]["gprsIp"]
-	vIn = localbuffer["mqtt"]["vIn"]
+	boardTemp = float(localbuffer["mqtt"]["boardTemp"])
+	cpuTemp = float(localbuffer["mqtt"]["cpuTemp"])
+	vIn = float(localbuffer["mqtt"]["vIn"])
 
-	buffer = {"timestamp":timestamp, "boardTemp":boardTemp, "cpuTemp":cpuTemp, "gprsIp":gprsIp, "vIn":vIn}
+	bootTime = int(psutil.boot_time())
+	cpuUsagePercent = psutil.cpu_percent(interval=1)
+	ram = psutil.virtual_memory()
+	swap = psutil.swap_memory()
+	disk = psutil.disk_usage('/')
+	buffer = {"timestamp":timestamp, "bootTime":bootTime, "boardTemp":boardTemp, "cpuTemp":cpuTemp, "vIn":vIn, "cpuPercent":cpuUsagePercent, "ramPercent":ram.percent, "swapPercent":swap.percent, "diskPercent":disk.percent}
 	localdb["sendList"]["telemetryList"].append(buffer)
+#end define
+
+def GettingBigTelemetryInfo():
+	AddLog("Start GettingBigTelemetryInfo thread.", "debug")
+	while True:
+		time.sleep(600) # 600 sec
+		threading.Thread(target=TryGetBigTelemetryInfo).start()
+#end define
+
+def TryGetBigTelemetryInfo():
+	try:
+		GetBigTelemetryInfo()
+	except Exception as err:
+		AddLog("TryGetBigTelemetryInfo: {0}".format(err), "error")
+#end define
+
+def GetBigTelemetryInfo():
+	global localdb
+	timestamp = int(time.time())
+	gprsIp = localbuffer["mqtt"]["gprsIp"]
+
+	bootTime = int(psutil.boot_time())
+	cpuFreq = psutil.cpu_freq()
+	cpuUsagePercent = psutil.cpu_percent(interval=1)
+	cpuArr = {"freq":cpuFreq.current, "percent":cpuUsagePercent}
+	ram = psutil.virtual_memory()
+	ramArr = {"total":b2mb(ram.total), "available":b2mb(ram.available), "used":b2mb(ram.used), "free":b2mb(ram.free), "active":b2mb(ram.active), "inactive":b2mb(ram.inactive), "buffers":b2mb(ram.buffers), "cached":b2mb(ram.cached)}
+	swap = psutil.swap_memory()
+	swapArr = {"total":b2mb(swap.total), "used":b2mb(swap.used), "free":b2mb(swap.free), "sin":b2mb(swap.sin), "sout":b2mb(swap.sout)}
+	disk = psutil.disk_usage('/')
+	diskio = psutil.disk_io_counters()
+	diskArr = {"total":b2mb(disk.total), "used":b2mb(disk.used), "free":b2mb(disk.free), "readMBytes":b2mb(diskio.read_bytes), "writeMBytes":b2mb(diskio.write_bytes), "readCount":diskio.read_count, "writeCount":diskio.write_count, "readTime":diskio.read_time, "writeTime":diskio.write_time, "readMergedCount":diskio.read_merged_count, "writeMergedCount":diskio.write_merged_count, "busyTime":diskio.busy_time}
+	netio = psutil.net_io_counters(pernic=True)
+	netaddr = psutil.net_if_addrs()
+	netstat = psutil.net_if_stats()
+	netArr = list()
+	for name in netio:
+		if netstat[name].isup == False:
+			continue
+		if netaddr[name][0][0] != socket.AF_INET:
+			continue
+		address = netaddr[name][0].address
+		buffer = {"name":name, "address":address, "sentMBytes":b2mb(netio[name].bytes_sent), "recvMBytes":b2mb(netio[name].bytes_recv), "sentPackets":netio[name].packets_sent, "recvPackets":netio[name].packets_recv, "errin":netio[name].errin, "errout":netio[name].errout, "dropin":netio[name].dropin, "dropout":netio[name].dropout}
+		netArr.append(buffer)
+	#end for
+
+	buffer = {"timestamp":timestamp, "bootTime":bootTime, "gprsIp":gprsIp, "cpu":cpuArr, "ram":ramArr, "swap":swapArr, "disk":diskArr, "net":netArr}
+	localdb["sendList"]["bigTelemetryList"].append(buffer)
+#end define
+
+def b2mb(item):
+	return int(item/1024/1024)
 #end define
 
 def SelfTesting():
@@ -776,7 +834,7 @@ def TrySelfUpdate():
 	try:
 		SelfUpdate()
 	except Exception as err:
-		AddLog("TrySelfUpdate: {0}".format(err))
+		AddLog("TrySelfUpdate: {0}".format(err), "error")
 #end define
 
 def SelfUpdate():
@@ -785,7 +843,7 @@ def SelfUpdate():
 	
 	myFullPath = GetMyFullPath()
 	text = GetRequest(md5Url)
-	md5FromServer = Pars(text, "md5: ")
+	md5FromServer = Pars(text, "tbot.py md5 checksum: ")
 	myMd5 = GetHashMd5(myFullPath)
 	if (myMd5 == md5FromServer):
 		return
@@ -813,6 +871,12 @@ def Pars(text, search):
 	text = text[text.find(search) + len(search):]
 	text = text[:text.find("\n")]
 	return text
+#end define
+
+def AddLogToSendList(text):
+	text = "{0}".format(text)
+	buffer = {"timestamp":int(time.time()), "text":text}
+	localdb["sendList"]["logList"].append(buffer)
 #end define
 
 
