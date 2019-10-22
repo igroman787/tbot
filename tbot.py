@@ -843,7 +843,7 @@ def SelfUpdate():
 	
 	myFullPath = GetMyFullPath()
 	text = GetRequest(md5Url)
-	md5FromServer = Pars(text, "tbot.py md5 checksum: ")
+	md5FromServer = Pars(text, "tbot.py md5: ")
 	myMd5 = GetHashMd5(myFullPath)
 	if (myMd5 == md5FromServer):
 		return
