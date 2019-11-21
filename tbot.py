@@ -52,9 +52,10 @@ def Init():
 		os.remove(localbuffer["logFileName"])
 
 	# Logging the start of the program
-	AddLog("Start program \"{0}\"".format(GetMyFullPath()))
+	AddLog("Start program '{0}'".format(GetMyFullPath()))
 	AddLogToSendList("Start tbot service")
 	AddLogToSendList("md5 checksum: {0}".format(myMd5))
+	AddLogToSendList("last shutdown log: {0}".format(os.popen("last -x | grep shutdown | tac | tail -n 1").read()))
 	os.system("logger -i Start tbot service")
 
 	# Start other threads
@@ -689,7 +690,7 @@ def LocaldbLoad():
 		file = open(fileName, 'r')
 		original = file.read()
 		localdb = Base64ToItemWithDecompress(original)
-		localdb["sendList"]["bigTelemetryList"] = list()
+		#localdb["sendList"]["bigTelemetryList"] = list()
 		file.close()
 		result = True
 	except Exception as err:
