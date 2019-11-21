@@ -690,7 +690,6 @@ def LocaldbLoad():
 		file = open(fileName, 'r')
 		original = file.read()
 		localdb = Base64ToItemWithDecompress(original)
-		#localdb["sendList"]["bigTelemetryList"] = list()
 		file.close()
 		result = True
 	except Exception as err:
