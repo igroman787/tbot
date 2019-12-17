@@ -55,7 +55,8 @@ def Init():
 	AddLog("Start program '{0}'".format(GetMyFullPath()))
 	AddLogToSendList("Start tbot service")
 	AddLogToSendList("md5 checksum: {0}".format(myMd5))
-	AddLogToSendList("last shutdown log: {0}".format(os.popen("last -x | grep shutdown | tac | tail -n 1").read()))
+	AddLogToSendList("The system was started {0} seconds ago".format(int(time.time() - psutil.boot_time())))
+	AddLogToSendList("Last shutdown log: {0}".format(os.popen("last -x | grep shutdown | tac | tail -n 1").read()))
 	os.system("logger -i Start tbot service")
 
 	# Start other threads
