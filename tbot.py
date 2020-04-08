@@ -6,6 +6,7 @@ import sys
 import time
 import zlib
 import json
+import serial
 import base64
 import socket
 import psutil
@@ -542,6 +543,7 @@ def SendNow():
 
 def DataSend():
 	global localdb
+	AddLog("Start DataSend function", "debug")
 	while (IsAnythinInSendList()):
 		data = GetDataFromSendList()
 		data.update({"hostname":socket.gethostname()})
@@ -723,6 +725,7 @@ def TryGetTelemetryInfo():
 
 def GetTelemetryInfo():
 	global localdb
+	AddLog("Start GetTelemetryInfo function", "debug")
 	timestamp = int(time.time())
 	boardTemp = float(localbuffer["mqtt"]["boardTemp"])
 	cpuTemp = float(localbuffer["mqtt"]["cpuTemp"])
@@ -733,7 +736,10 @@ def GetTelemetryInfo():
 	ram = psutil.virtual_memory()
 	swap = psutil.swap_memory()
 	disk = psutil.disk_usage('/')
-	buffer = {"timestamp":timestamp, "bootTime":bootTime, "boardTemp":boardTemp, "cpuTemp":cpuTemp, "vIn":vIn, "cpuPercent":cpuUsagePercent, "ramPercent":ram.percent, "swapPercent":swap.percent, "diskPercent":disk.percent}
+	
+	rssi = GetRSSI()
+	commValue = Rssi2CommValue(rssi)
+	buffer = {"timestamp":timestamp, "bootTime":bootTime, "boardTemp":boardTemp, "cpuTemp":cpuTemp, "vIn":vIn, "cpuPercent":cpuUsagePercent, "ramPercent":ram.percent, "swapPercent":swap.percent, "diskPercent":disk.percent, "rssi":rssi, "commValue":commValue}
 	localdb["sendList"]["telemetryList"].append(buffer)
 #end define
 
@@ -753,6 +759,7 @@ def TryGetBigTelemetryInfo():
 
 def GetBigTelemetryInfo():
 	global localdb
+	AddLog("Start GetBigTelemetryInfo function", "debug")
 	timestamp = int(time.time())
 	gprsIp = localbuffer["mqtt"]["gprsIp"]
 
@@ -777,7 +784,7 @@ def GetBigTelemetryInfo():
 		if netaddr[name][0][0] != socket.AF_INET:
 			continue
 		address = netaddr[name][0].address
-		buffer = {"name":name, "address":address, "sentMBytes":b2mb(netio[name].bytes_sent), "recvMBytes":b2mb(netio[name].bytes_recv), "sentPackets":netio[name].packets_sent, "recvPackets":netio[name].packets_recv, "errin":netio[name].errin, "errout":netio[name].errout, "dropin":netio[name].dropin, "dropout":netio[name].dropout}
+		buffer = {"name":name, "address":address, "sentMB":b2mb(netio[name].bytes_sent), "recvMB":b2mb(netio[name].bytes_recv), "sentPackets":netio[name].packets_sent, "recvPackets":netio[name].packets_recv, "errin":netio[name].errin, "errout":netio[name].errout, "dropin":netio[name].dropin, "dropout":netio[name].dropout}
 		netArr.append(buffer)
 	#end for
 
@@ -786,7 +793,7 @@ def GetBigTelemetryInfo():
 #end define
 
 def b2mb(item):
-	return int(item/1024/1024)
+	return int(item/1000/1000)
 #end define
 
 def SelfTesting():
@@ -839,6 +846,7 @@ def TrySelfUpdate():
 #end define
 
 def SelfUpdate():
+	AddLog("Start SelfUpdate function", "debug")
 	md5Url = base64.b64decode("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2lncm9tYW43ODcvdGJvdC9tYXN0ZXIvUkVBRE1FLm1k").decode()
 	appUrl = base64.b64decode("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2lncm9tYW43ODcvdGJvdC9tYXN0ZXIvdGJvdC5weQ==").decode()
 	
@@ -878,6 +886,76 @@ def AddLogToSendList(text):
 	text = "{0}".format(text)
 	buffer = {"timestamp":int(time.time()), "text":text}
 	localdb["sendList"]["logList"].append(buffer)
+#end define
+
+def GetPhoneConnect():
+	device = "/dev/ttyGSM"
+	phone = serial.Serial(device, baudrate=115200, bytesize=8, parity='N', stopbits=1)
+	phone.timeout = 3
+	return phone
+#end define
+
+def PhoneSend(phone, text):
+	text += '\r'
+	phone.write(text.encode("ascii"))
+	data = phone.read(32)
+	result = data.decode("ascii")
+	resultList = result.split('\n')
+	DelItemFromList(resultList, '')
+	DelItemFromList(resultList, '\r')
+	resultList.pop(0)
+	if "OK\r" not in resultList:
+		raise Exception("PhoneSend error. Not ok.")
+	elif len(resultList) > 1:
+		DelItemFromList(resultList, "OK\r")
+	result = resultList[0]
+	return result
+#end define
+
+def DelItemFromList(dataList, item):
+	if item in dataList:
+		dataList.remove(item)
+#end define
+
+def GetRSSI():
+	phone = GetPhoneConnect()
+	result = PhoneSend(phone, "AAAAAAAAAAAAAT")
+	result = PhoneSend(phone, "AT+CSQ")
+	buff = Pars(result, "CSQ:")
+	buff = buff.replace(' ', '')
+	buff = buff.replace(',', '.')
+	buff = float(buff)
+	csq = int(buff)
+	rssi = Csq2Rssi(csq)
+	phone.close()
+	return rssi
+#end define
+
+def Csq2Rssi(csq):
+	result = -111
+	odds = 2
+	buff = csq-1
+	for i in range(buff):
+		result += odds
+	return result
+#end define
+
+def Rssi2CommValue(rssi):
+	if rssi > -74:
+		result = 5
+	elif rssi > -84:
+		result = 4
+	elif rssi > -94:
+		result = 3
+	elif rssi > -104:
+		result = 2
+	elif rssi > -114:
+		result = 2
+	elif rssi > -124:
+		result = 1
+	else:
+		result = 0
+	return result
 #end define
 
 
